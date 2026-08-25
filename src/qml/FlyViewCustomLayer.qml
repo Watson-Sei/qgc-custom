@@ -40,12 +40,13 @@ Item {
                                     ? leftEdgeColumn.x + leftEdgeColumn.occupiedWidth + _toolsMargin
                                     : parentToolInsets.leftEdgeCenterInset
         leftEdgeBottomInset:    parentToolInsets.leftEdgeBottomInset
-        // Our right hand panels sit inboard of the stock instrument panel, so
-        // the space they take adds to whatever the parent already reserved.
-        rightEdgeTopInset:      rightEdgeColumn.occupiedWidth > 0
-                                    ? parentToolInsets.rightEdgeTopInset + rightEdgeColumn.occupiedWidth + _toolsMargin
-                                    : parentToolInsets.rightEdgeTopInset
-        rightEdgeCenterInset:   parentToolInsets.rightEdgeCenterInset
+        rightEdgeTopInset:      parentToolInsets.rightEdgeTopInset
+        // Our right hand panels sit directly below the stock instrument panel,
+        // so they eat into the centre of the right edge rather than the top.
+        rightEdgeCenterInset:   Math.max(parentToolInsets.rightEdgeCenterInset,
+                                         rightEdgeColumn.occupiedWidth > 0
+                                             ? rightEdgeColumn.occupiedWidth + (_toolsMargin * 2)
+                                             : 0)
         rightEdgeBottomInset:   parentToolInsets.rightEdgeBottomInset
         topEdgeLeftInset:       parentToolInsets.topEdgeLeftInset
         topEdgeCenterInset:     parentToolInsets.topEdgeCenterInset
@@ -77,13 +78,14 @@ Item {
         Item { Layout.fillHeight: true }
     }
 
-    // Right edge, inboard of the stock instrument panel so nothing is covered.
+    // Right edge, directly under the stock instrument panel so nothing is covered.
     ColumnLayout {
         id:                     rightEdgeColumn
         anchors.right:          parent.right
-        anchors.rightMargin:    parentToolInsets.rightEdgeTopInset + _toolsMargin
+        anchors.rightMargin:    _toolsMargin
+        // Directly below the stock instrument panel, flush with the right edge
         anchors.top:            parent.top
-        anchors.topMargin:      _toolsMargin
+        anchors.topMargin:      parentToolInsets.topEdgeRightInset + _toolsMargin
         height:                 parent.height - anchors.topMargin - parentToolInsets.bottomEdgeRightInset - _toolsMargin
         spacing:                _toolsMargin
         visible:                !QGroundControl.videoManager.fullScreen
