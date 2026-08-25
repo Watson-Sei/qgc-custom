@@ -1,0 +1,154 @@
+name: Build macOS DMG
+
+# Builds QGroundControl with this overlay applied and publishes the .dmg as the
+# rolling "latest" pre-release. The upstream QGC tag is pinned in .qgc-version.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # required to create/update the release
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout overlay
+        uses: actions/checkout@v4
+        with:
+          path: qgc-custom
+
+      - name: Resolve upstream QGC version
+        id: qgc
+        run: echo "tag=$(tr -d '[:space:]' < qgc-custom/.qgc-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout QGroundControl ${{ steps.qgc.outputs.tag }}
+        uses: actions/checkout@v4
+        with:
+          repository: mavlink/qgroundcontrol
+          ref: ${{ steps.qgc.outputs.tag }}
+          path: qgroundcontrol
+          fetch-depth: 1
+
+      # Upstream picks the overlay up automatically from <source root>/custom
+      - name: Apply overlay
+        run: ln -s ../qgc-custom qgroundcontrol/custom
+
+      - name: Install Qt
+        run: |
+          python3 -m venv "$RUNNER_TEMP/aqt"
+          "$RUNNER_TEMP/aqt/bin/pip" install --quiet aqtinstall
+          "$RUNNER_TEMP/aqt/bin/aqt" install-qt mac desktop "$QT_VERSION" clang_64 \
+            --outputdir "$RUNNER_TEMP/Qt" \
+            -m qtgraphs qtlocation qtpositioning qtspeech qtmultimedia qtserialport \
+               qtimageformats qtshadertools qtconnectivity qtquick3d qtsensors qtscxml \
+               qtwebsockets qthttpserver
+        env:
+          QT_VERSION: '6.11.1'
+
+      - name: Install build tools
+        run: |
+          for pkg in ninja ccache create-dmg; do
+            brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
+          done
+
+      # Upstream bootstraps <repo>/.venv itself, but its bootstrap can produce a
+      # venv without pip, which makes the MAVLink header generation hard-fail.
+      # python -m venv seeds pip, and PythonVenv.cmake accepts an existing venv.
+      - name: Pre-seed the MAVLink build venv
+        run: |
+          python3 -m venv qgroundcontrol/.venv
+          qgroundcontrol/.venv/bin/python -m ensurepip --upgrade
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-macos-${{ steps.qgc.outputs.tag }}-${{ github.sha }}
+          restore-keys: |
+            ccache-macos-${{ steps.qgc.outputs.tag }}-
+
+      - name: Configure
+        working-directory: qgroundcontrol
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/Qt/$QT_VERSION/macos"
+        env:
+          QT_VERSION: '6.11.1'
+
+      - name: Build
+        working-directory: qgroundcontrol
+        run: cmake --build build --parallel
+
+      # Produces build/QGroundControl.dmg via upstream's create-dmg packaging.
+      # Signing/notarization stays off until the Secrets below are populated;
+      # see "配布について" in the release body.
+      - name: Package DMG
+        working-directory: qgroundcontrol/build
+        run: cmake --install . --config Release
+
+      - name: Verify DMG
+        working-directory: qgroundcontrol/build
+        run: |
+          test -f QGroundControl.dmg
+          hdiutil attach QGroundControl.dmg -nobrowse -mountpoint /Volumes/QGCVerify
+          test -x /Volumes/QGCVerify/QGroundControl.app/Contents/MacOS/QGroundControl
+          lipo -archs /Volumes/QGCVerify/QGroundControl.app/Contents/MacOS/QGroundControl
+          hdiutil detach /Volumes/QGCVerify
+
+      # Fixed filename so the "latest" release keeps one stable download URL and
+      # each run replaces the previous asset instead of piling up.
+      - name: Name the artifact
+        working-directory: qgroundcontrol/build
+        run: mv QGroundControl.dmg QGroundControl-custom.dmg
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QGroundControl-custom-${{ steps.qgc.outputs.tag }}-${{ github.sha }}
+          path: qgroundcontrol/build/QGroundControl-custom.dmg
+          retention-days: 14
+
+      - name: Write release notes
+        run: |
+          cat > notes.md <<'EOF'
+          main への push ごとに自動ビルドされる最新版です。
+
+          - QGroundControl: ${{ steps.qgc.outputs.tag }}
+          - overlay commit: ${{ github.sha }}
+
+          ## インストール
+
+          **このビルドは Apple のコード署名がされていません。** そのまま開くと
+          「"QGroundControl" は壊れているため開けません」と表示されます。
+          ダウンロードして `/Applications` にコピーしたあと、一度だけ次を実行してください。
+
+          ```bash
+          xattr -dr com.apple.quarantine /Applications/QGroundControl.app
+          ```
+
+          ## 含まれるカスタム機能
+
+          - **ESC テレメトリ** — ESC ごとの RPM / 電圧 / 電流を Fly View 左端に時系列グラフ表示
+          - **HDMI キャプチャ** — UVC キャプチャ映像を Fly View 右端に表示、MP4 録画つき
+          EOF
+
+      - name: Publish latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: latest
+          body_path: notes.md
+          prerelease: true
+          files: qgroundcontrol/build/QGroundControl-custom.dmg
