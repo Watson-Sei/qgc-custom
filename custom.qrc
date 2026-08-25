@@ -1,0 +1,8 @@
+<RCC>
+    <!-- Files listed here shadow the upstream resource of the same path.
+         CustomPlugin's url interceptor rewrites qrc:/<path> to
+         qrc:/Custom/<path> whenever the latter exists. -->
+    <qresource prefix="/Custom/qml">
+        <file alias="QGroundControl/FlyView/FlyViewCustomLayer.qml">src/qml/FlyViewCustomLayer.qml</file>
+    </qresource>
+</RCC>
