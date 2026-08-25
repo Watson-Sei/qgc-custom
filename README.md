@@ -1,7 +1,18 @@
-# qgc-custom — ESC テレメトリグラフ (Fly View オーバーレイ)
+# qgc-custom — QGroundControl Fly View カスタムオーバーレイ
 
-QGroundControl の Fly View に、ESC ごとの **RPM / 電圧 / 電流** を時系列グラフで
-重ねて表示する custom build オーバーレイです。
+![QGroundControl の Fly View に ESC テレメトリグラフと HDMI キャプチャパネルを重ねた画面](docs/screenshot.png)
+
+QGroundControl の Fly View に独自のパネルを重ねる custom build オーバーレイです。
+上のスクリーンショットは実際の画面で、左が **ESC ごとの RPM / 電圧 / 電流**
+グラフ、右が **HDMI キャプチャ映像 + 録画ボタン** です
+（映像部分は撮影用に OBS 仮想カメラのプレースホルダを映しています）。
+
+現在の機能:
+
+| 機能 | 内容 |
+|---|---|
+| `EscTelemetry` | ESC ごとの RPM / 電圧 / 電流を時系列グラフ表示（左端） |
+| `HdmiVideo` | UVC キャプチャ映像の表示と MP4 録画（右端） |
 
 **QGC 本体のソースは 1 行も変更していません。** upstream の更新は
 `git pull` するだけで取り込めます。
