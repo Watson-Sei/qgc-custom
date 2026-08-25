@@ -50,10 +50,13 @@ custom-qgc/
     │   └── qml/
     │       └── FlyViewCustomLayer.qml   # 各機能のパネルを並べるだけ
     ├── res/Custom/                      # 1 ディレクトリ = 1 機能
-    │   └── EscTelemetry/                # QML モジュール Custom.EscTelemetry
+    │   ├── EscTelemetry/                # QML モジュール Custom.EscTelemetry
+    │   │   ├── CMakeLists.txt
+    │   │   ├── EscTelemetryPanel.qml    # 折りたたみパネル + サンプリング
+    │   │   └── EscTelemetryChart.qml    # 1 メトリクス分のストリップチャート
+    │   └── HdmiVideo/                   # QML モジュール Custom.HdmiVideo
     │       ├── CMakeLists.txt
-    │       ├── EscTelemetryPanel.qml    # 折りたたみパネル + サンプリング
-    │       └── EscTelemetryChart.qml    # 1 メトリクス分のストリップチャート
+    │       └── HdmiVideoPanel.qml       # UVC キャプチャ映像パネル
     └── tools/
         └── esc_sim.py                   # 機体なしで動作確認するための ESC シミュレータ
 ```
@@ -206,6 +209,37 @@ PYTHONPATH=~/custom-qgc/qgroundcontrol/build/_deps/mavlink-build/pip-dependencie
 - 右上の `30s` をクリックで表示時間幅を 10 / 30 / 60 / 120 秒で切り替え
 - 凡例の `M1`, `M2`, … の色が各グラフの線色に対応
 - 各グラフのヘッダ右側に最新値を色付きで表示
+
+### HDMI 映像パネル (右上)
+
+FPV ゴーグルの HDMI 出力を USB HDMI キャプチャドングル経由で表示します。
+
+**必要なもの**: UVC 対応の USB HDMI キャプチャ機器。macOS はこれを普通のカメラ
+（ビデオ入力）として認識するので、ドライバは不要です。ゴーグル固有の処理は
+一切していないため、HDMI 出力があるゴーグルなら機種を問いません。
+
+- ヘッダをクリックで折りたたみ／展開（折りたたむとキャプチャデバイスを解放します）
+- ドロップダウンで入力デバイスを選択。選択内容は `QSettings` に保存され次回も復元されます
+  （デバイス ID は再起動やポートで変わるため、QGC の UVC と同じくデバイス名で照合）
+- 表示は 16:9 の枠に `PreserveAspectFit`。入力が 4:3 なら左右に黒帯が入ります
+
+`QGroundControl.videoManager` とは**独立**しています。ここでデバイスを選んでも
+アプリケーション設定のビデオ設定は変わらず、機体側の映像と同時に表示できます。
+
+**位置**: 純正のインストゥルメントパネルを隠さないよう、その左隣（内側）に置いています。
+右端ぴったりに寄せたい場合は `src/qml/FlyViewCustomLayer.qml` の `rightEdgeColumn` の
+`anchors.rightMargin` から `parentToolInsets.rightEdgeTopInset` を外してください
+（純正パネルと重なります）。
+
+**遅延について**: USB キャプチャ経由なので、ゴーグルで直接見るより確実に遅れます。
+機器にもよりますが概ね数十〜百数十 ms 程度で、操縦用ではなく確認・記録用途向けです。
+
+### 調整ポイント (`HdmiVideoPanel.qml`)
+
+| プロパティ | 既定値 | 意味 |
+|---|---|---|
+| `aspectRatio` | 16/9 | 映像枠のアスペクト比 |
+| `_expandedWidth` | 40 文字幅 | パネル幅（高さはアスペクト比から算出） |
 
 ### 調整ポイント (`EscTelemetryPanel.qml`)
 

@@ -5,6 +5,7 @@ import QGroundControl
 import QGroundControl.Controls
 
 import Custom.EscTelemetry
+import Custom.HdmiVideo
 
 // Custom Fly View overlay layer.
 //
@@ -18,9 +19,9 @@ import Custom.EscTelemetry
 //   totalToolInsets  - what is free once this layer's own additions are counted
 //   mapControl       - the FlightMap instance
 //
-// To add a panel: drop it into leftEdgeColumn below. Panels are expected to
-// set their own Layout attached properties (see EscTelemetryPanel), so the
-// column shares the available height between them automatically.
+// To add a panel: drop it into leftEdgeColumn or rightEdgeColumn below.
+// Panels are expected to set their own Layout attached properties (see
+// EscTelemetryPanel), so a column shares its height between them automatically.
 Item {
     id: _root
 
@@ -39,7 +40,11 @@ Item {
                                     ? leftEdgeColumn.x + leftEdgeColumn.occupiedWidth + _toolsMargin
                                     : parentToolInsets.leftEdgeCenterInset
         leftEdgeBottomInset:    parentToolInsets.leftEdgeBottomInset
-        rightEdgeTopInset:      parentToolInsets.rightEdgeTopInset
+        // Our right hand panels sit inboard of the stock instrument panel, so
+        // the space they take adds to whatever the parent already reserved.
+        rightEdgeTopInset:      rightEdgeColumn.occupiedWidth > 0
+                                    ? parentToolInsets.rightEdgeTopInset + rightEdgeColumn.occupiedWidth + _toolsMargin
+                                    : parentToolInsets.rightEdgeTopInset
         rightEdgeCenterInset:   parentToolInsets.rightEdgeCenterInset
         rightEdgeBottomInset:   parentToolInsets.rightEdgeBottomInset
         topEdgeLeftInset:       parentToolInsets.topEdgeLeftInset
@@ -66,9 +71,30 @@ Item {
 
         EscTelemetryPanel { }
 
-        // Add further Fly View panels here.
+        // Add further left edge panels here.
 
         // Soaks up the leftover height so the panels stay pinned to the top
+        Item { Layout.fillHeight: true }
+    }
+
+    // Right edge, inboard of the stock instrument panel so nothing is covered.
+    ColumnLayout {
+        id:                     rightEdgeColumn
+        anchors.right:          parent.right
+        anchors.rightMargin:    parentToolInsets.rightEdgeTopInset + _toolsMargin
+        anchors.top:            parent.top
+        anchors.topMargin:      _toolsMargin
+        height:                 parent.height - anchors.topMargin - parentToolInsets.bottomEdgeRightInset - _toolsMargin
+        spacing:                _toolsMargin
+        visible:                !QGroundControl.videoManager.fullScreen
+
+        // Width actually taken on screen, 0 when every panel is hidden
+        property real occupiedWidth: visible ? childrenRect.width : 0
+
+        HdmiVideoPanel { }
+
+        // Add further right edge panels here.
+
         Item { Layout.fillHeight: true }
     }
 }
