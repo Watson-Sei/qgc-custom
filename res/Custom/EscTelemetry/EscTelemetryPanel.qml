@@ -16,10 +16,11 @@ Rectangle {
     height:     expanded ? Math.min(availableHeight, _expandedHeight)
                          : headerItem.height + (_margins * 2)
     radius:     ScreenTools.defaultFontPixelWidth / 2
+    clip:       true
     color:      qgcPal.window
     opacity:    0.85
     // No ESC telemetry on this vehicle means the panel stays completely out of the way
-    visible:    _escCount > 0
+    visible:    escCount > 0
 
     /// Vertical room this panel may use, handed down by the custom layer
     property real availableHeight:  ScreenTools.defaultFontPixelHeight * 30
@@ -41,15 +42,24 @@ Rectangle {
 
     property var  _activeVehicle:   QGroundControl.multiVehicleManager.activeVehicle
     property var  _escs:            _activeVehicle ? _activeVehicle.escs : null
-    property int  _escCount:        _escs ? Math.min(_escs.count, maxEscCount) : 0
+
+    // QGC creates fact groups in blocks of four, because one ESC_STATUS message
+    // carries indices index..index+3. A six-motor vehicle therefore reports
+    // escs.count == 8, with the last two stuck at zero. ESC_INFO's `count` is
+    // the real number of ESCs, so prefer it whenever the vehicle sends it.
+    property int  _reportedEscCount: _escs && _escs.count > 0 ? _escs.get(0).count.rawValue : 0
+    property int  escCount:        !_escs ? 0
+                                    : Math.min(_reportedEscCount > 0 ? _reportedEscCount : _escs.count,
+                                               maxEscCount)
     property real _margins:         ScreenTools.defaultFontPixelWidth * 0.5
-    property real _expandedWidth:   ScreenTools.defaultFontPixelWidth * 34
+    property real _expandedWidth:   ScreenTools.defaultFontPixelWidth * 44
     property real _collapsedWidth:  ScreenTools.defaultFontPixelWidth * 9
     property real _expandedHeight:  ScreenTools.defaultFontPixelHeight * 26
     property real _elapsedSec:      0
 
-    onExpandedChanged:  _resetHistory()
+    onExpandedChanged:   _resetHistory()
     onWindowSecsChanged: _resetHistory()
+    onEscCountChanged:   _resetHistory()
 
     Connections {
         target: QGroundControl.multiVehicleManager
@@ -68,7 +78,7 @@ Rectangle {
             return
         }
 
-        const count = _escCount
+        const count = escCount
         let rpm = []
         let voltage = []
         let current = []
@@ -129,7 +139,7 @@ Rectangle {
 
                 QGCLabel {
                     visible:            root.expanded
-                    text:               qsTr("%1 motors").arg(root._escCount)
+                    text:               qsTr("%1 motors").arg(root.escCount)
                     font.pointSize:     ScreenTools.smallFontPointSize
                     color:              qgcPal.text
                     Layout.alignment:   Qt.AlignVCenter
@@ -164,7 +174,7 @@ Rectangle {
             spacing:            ScreenTools.defaultFontPixelWidth
 
             Repeater {
-                model: root._escCount
+                model: root.escCount
 
                 QGCLabel {
                     text:           qsTr("M%1").arg(index + 1)
@@ -185,6 +195,7 @@ Rectangle {
             title:              qsTr("RPM")
             windowSecs:         root.windowSecs
             seriesColors:       root.seriesColors
+            clampToZero:        false
             decimals:           0
             minYSpan:           100
         }

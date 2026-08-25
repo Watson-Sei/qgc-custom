@@ -125,6 +125,22 @@ git diff v5.1.3..HEAD -- src/FlyView/FlyViewCustomLayer.qml \
 
 ---
 
+## 4.5 動作確認（機体なしで）
+
+`tools/esc_sim.py` が 8 モータ分の ESC_STATUS / ESC_INFO を UDP 14550 に流します。
+QGC を起動した状態で実行するとパネルが出ます。
+
+```bash
+cd ~/custom-qgc/qgroundcontrol/.cache/CPM/mavlink/*/
+PYTHONPATH=~/custom-qgc/qgroundcontrol/build/_deps/mavlink-build/pip-dependencies:. \
+  ~/custom-qgc/qgroundcontrol/.venv/bin/python ~/custom-qgc/qgc-custom/tools/esc_sim.py
+```
+
+「パラメータのリクエストに応答しませんでした」というダイアログが出ますが、
+偽の機体がパラメータを返さないだけで、ESC 表示には影響しません。
+
+---
+
 ## 5. UI の使い方
 
 - Fly View 左端、ツールストリップの下にパネルが出ます
@@ -141,6 +157,17 @@ git diff v5.1.3..HEAD -- src/FlyView/FlyViewCustomLayer.qml \
 | `sampleIntervalMs` | 200 | サンプリング周期 (ms)。5 Hz |
 | `windowSecs` | 30 | 初期表示時間幅 (秒) |
 | `maxEscCount` | 8 | 描画する ESC の最大数 |
+
+### ESC 本数の決まり方
+
+4in1 かディスクリートかは QGC からは見えません。効くのは FC が ESC_STATUS の
+`index` で何本報告するかだけです。
+
+ただし upstream の `EscStatusFactGroupListModel` は ESC_STATUS 1 通につき
+`index`〜`index+3` の **4 本分まとめて** FactGroup を作るため、6 モータ機でも
+`escs.count` は 8 になり、7・8 本目が 0 のまま平らな線として出ます。
+そのため本実装では ESC_INFO の `count`（総 ESC 本数）があればそちらを優先し、
+無い場合のみ `escs.count` にフォールバックしています。
 | `seriesColors` | 8 色 | ESC ごとの線色 |
 
 表示位置を右側などに変えたい場合は `src/qml/FlyViewCustomLayer.qml` の
