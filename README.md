@@ -41,17 +41,21 @@ QML の差し替えは Qt リソースの上書きで行います。`custom.qrc`
 custom-qgc/
 ├── qgroundcontrol/          # upstream (無改変)。custom -> ../qgc-custom の symlink のみ
 └── qgc-custom/              # ← このリポジトリ
-    ├── CMakeLists.txt       # custom ビルドのエントリポイント
+    ├── CMakeLists.txt       # 機能一覧 + qgc_custom_add_feature ヘルパ
     ├── custom.qrc           # QML リソース上書きの定義
     ├── cmake/
     │   └── CustomOverrides.cmake
     ├── src/
-    │   ├── CustomPlugin.h/.cc   # 最小限の QGCCorePlugin サブクラス
+    │   ├── CustomPlugin.h/.cc           # 最小限の QGCCorePlugin サブクラス
     │   └── qml/
-    │       └── FlyViewCustomLayer.qml   # Fly View オーバーレイ本体
-    └── res/Custom/EscTelemetry/         # QML モジュール Custom.EscTelemetry
-        ├── EscTelemetryPanel.qml        # 折りたたみ可能なパネル + サンプリング
-        └── EscTelemetryChart.qml        # 1 メトリクス分のストリップチャート
+    │       └── FlyViewCustomLayer.qml   # 各機能のパネルを並べるだけ
+    ├── res/Custom/                      # 1 ディレクトリ = 1 機能
+    │   └── EscTelemetry/                # QML モジュール Custom.EscTelemetry
+    │       ├── CMakeLists.txt
+    │       ├── EscTelemetryPanel.qml    # 折りたたみパネル + サンプリング
+    │       └── EscTelemetryChart.qml    # 1 メトリクス分のストリップチャート
+    └── tools/
+        └── esc_sim.py                   # 機体なしで動作確認するための ESC シミュレータ
 ```
 
 `qgroundcontrol/custom` は `../qgc-custom` への symlink です。
@@ -122,6 +126,59 @@ git diff v5.1.3..HEAD -- src/FlyView/FlyViewCustomLayer.qml \
                           src/Vehicle/FactGroups/EscStatusFactGroupListModel.h \
                           custom-example/CMakeLists.txt
 ```
+
+---
+
+## 4.2 新機能の追加手順
+
+1 機能 = `res/Custom/<機能名>/` 1 ディレクトリ = QML モジュール `Custom.<機能名>` 1 つ、という対応です。
+
+**1. ディレクトリと QML を作る**
+
+```
+res/Custom/MyFeature/
+├── CMakeLists.txt
+└── MyFeaturePanel.qml
+```
+
+**2. `res/Custom/MyFeature/CMakeLists.txt`**
+
+```cmake
+qgc_custom_add_feature(
+    NAME MyFeature
+    QML_FILES
+        MyFeaturePanel.qml
+    # SOURCES MyFeatureController.cc MyFeatureController.h   # C++ が要るとき
+)
+```
+
+C++ を足した場合、そのディレクトリは自動で include path に入り、
+ソースは upstream の `CUSTOM_SOURCES` に追加されます。
+
+**3. ルート `CMakeLists.txt` の機能一覧に追記**
+
+```cmake
+set(QGC_CUSTOM_FEATURES
+    EscTelemetry
+    MyFeature
+)
+```
+
+**4. Fly View に出すなら `src/qml/FlyViewCustomLayer.qml` の `leftEdgeColumn` に置く**
+
+```qml
+import Custom.MyFeature
+...
+    EscTelemetryPanel { }
+    MyFeaturePanel { }        // ここに足すだけ
+```
+
+パネル側が `Layout.preferredWidth` / `Layout.maximumHeight` / `Layout.fillHeight` を
+自分で宣言していれば（`EscTelemetryPanel` を参照）、カラムが高さを配分します。
+
+**Fly View 以外の upstream QML を差し替えたいとき**は `custom.qrc` に
+`<file alias="元のリソースパス">自分のファイル</file>` を追加します。
+`CustomPlugin` の URL interceptor が実行時に差し替えます。
 
 ---
 

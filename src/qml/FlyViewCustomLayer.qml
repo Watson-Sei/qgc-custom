@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Layouts
 
 import QGroundControl
 import QGroundControl.Controls
@@ -10,12 +11,16 @@ import Custom.EscTelemetry
 // This file replaces src/FlyView/FlyViewCustomLayer.qml at runtime through the
 // resource override installed by CustomPlugin. It is instantiated by
 // FlyView.qml on top of the standard widget layer, so anything added here sits
-// above the map/video and below nothing else.
+// above the map/video.
 //
 // Contract with FlyView.qml (do not rename these properties):
-//   parentToolInsets - screen real estate still free below/around the stock widgets
-//   totalToolInsets  - what is free once this layer's own additions are accounted for
+//   parentToolInsets - screen real estate still free around the stock widgets
+//   totalToolInsets  - what is free once this layer's own additions are counted
 //   mapControl       - the FlightMap instance
+//
+// To add a panel: drop it into leftEdgeColumn below. Panels are expected to
+// set their own Layout attached properties (see EscTelemetryPanel), so the
+// column shares the available height between them automatically.
 Item {
     id: _root
 
@@ -28,10 +33,11 @@ Item {
     QGCToolInsets {
         id:                     _toolInsets
         leftEdgeTopInset:       parentToolInsets.leftEdgeTopInset
-        // Tell the map how much of the left edge our panel eats so the vehicle
-        // is not re-centered underneath it.
-        leftEdgeCenterInset:    escTelemetryPanel.visible ? escTelemetryPanel.x + escTelemetryPanel.width + _toolsMargin
-                                                          : parentToolInsets.leftEdgeCenterInset
+        // Tell the map how much of the left edge our panels eat, so the vehicle
+        // is not re-centered underneath them.
+        leftEdgeCenterInset:    leftEdgeColumn.occupiedWidth > 0
+                                    ? leftEdgeColumn.x + leftEdgeColumn.occupiedWidth + _toolsMargin
+                                    : parentToolInsets.leftEdgeCenterInset
         leftEdgeBottomInset:    parentToolInsets.leftEdgeBottomInset
         rightEdgeTopInset:      parentToolInsets.rightEdgeTopInset
         rightEdgeCenterInset:   parentToolInsets.rightEdgeCenterInset
@@ -44,15 +50,25 @@ Item {
         bottomEdgeRightInset:   parentToolInsets.bottomEdgeRightInset
     }
 
-    // Positioned on the left edge, directly below the tool strip and above the
-    // virtual joystick (if enabled), using the insets handed down to us.
-    EscTelemetryPanel {
-        id:                     escTelemetryPanel
+    // Left edge, below the tool strip and above the virtual joystick.
+    ColumnLayout {
+        id:                     leftEdgeColumn
         anchors.left:           parent.left
         anchors.leftMargin:     _toolsMargin
         anchors.top:            parent.top
         anchors.topMargin:      parentToolInsets.topEdgeLeftInset + _toolsMargin
-        availableHeight:        parent.height - anchors.topMargin - parentToolInsets.bottomEdgeLeftInset - _toolsMargin
+        height:                 parent.height - anchors.topMargin - parentToolInsets.bottomEdgeLeftInset - _toolsMargin
+        spacing:                _toolsMargin
         visible:                !QGroundControl.videoManager.fullScreen
+
+        // Width actually taken on screen, 0 when every panel is hidden
+        property real occupiedWidth: visible ? childrenRect.width : 0
+
+        EscTelemetryPanel { }
+
+        // Add further Fly View panels here.
+
+        // Soaks up the leftover height so the panels stay pinned to the top
+        Item { Layout.fillHeight: true }
     }
 }

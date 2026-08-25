@@ -11,19 +11,24 @@ import QGroundControl.Controls
 /// depends on QGC internals beyond those public QML properties, so upstream
 /// refactors of the Fly View cannot break it.
 Rectangle {
-    id:         root
-    width:      expanded ? _expandedWidth : _collapsedWidth
-    height:     expanded ? Math.min(availableHeight, _expandedHeight)
-                         : headerItem.height + (_margins * 2)
+    id:             root
+    implicitWidth:  expanded ? _expandedWidth : _collapsedWidth
+    implicitHeight: expanded ? _expandedHeight : headerItem.implicitHeight + (_margins * 2)
+
+    // Set here rather than at the use site so the panel drops into the Fly
+    // View column (or any other layout) without extra wiring. Ignored when the
+    // panel is not inside a layout.
+    Layout.preferredWidth:  implicitWidth
+    Layout.preferredHeight: implicitHeight
+    Layout.maximumHeight:   implicitHeight
+    Layout.fillHeight:      true
+    Layout.alignment:       Qt.AlignLeft | Qt.AlignTop
     radius:     ScreenTools.defaultFontPixelWidth / 2
     clip:       true
     color:      qgcPal.window
     opacity:    0.85
     // No ESC telemetry on this vehicle means the panel stays completely out of the way
     visible:    escCount > 0
-
-    /// Vertical room this panel may use, handed down by the custom layer
-    property real availableHeight:  ScreenTools.defaultFontPixelHeight * 30
 
     property bool expanded:         true
     property int  sampleIntervalMs: 200     ///< 5 Hz sampling
