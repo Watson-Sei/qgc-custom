@@ -167,8 +167,6 @@ Rectangle {
                 model: root._escCount
 
                 QGCLabel {
-                    required property int index
-
                     text:           qsTr("M%1").arg(index + 1)
                     font.pointSize: ScreenTools.smallFontPointSize
                     font.bold:      true

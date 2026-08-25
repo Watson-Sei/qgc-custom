@@ -22,13 +22,17 @@ message(STATUS "QGC: Custom overlay - ESC telemetry graphs")
 # qrc:/Custom/<path> when that resource exists, which is what makes the
 # override take effect without touching the upstream .qml file.
 # ----------------------------------------------------------------------------
-list(APPEND CUSTOM_RESOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/custom.qrc
-)
-set(QGC_RESOURCES ${QGC_RESOURCES} ${CUSTOM_RESOURCES} CACHE STRING "Paths to .qrc Resources" FORCE)
+# REMOVE_DUPLICATES matters: these are FORCE'd cache variables, so without it
+# every re-configure would append our entry again and the executable would end
+# up with the same .qrc listed several times.
+set(_custom_resources ${QGC_RESOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/custom.qrc")
+list(REMOVE_DUPLICATES _custom_resources)
+set(QGC_RESOURCES ${_custom_resources} CACHE STRING "Paths to .qrc Resources" FORCE)
 
 # Let QML tooling (qmllint / Qt Creator) resolve `import Custom.EscTelemetry`
-set(QML_IMPORT_PATH ${QML_IMPORT_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/res" CACHE STRING "Extra qml import paths" FORCE)
+set(_custom_qml_import_path ${QML_IMPORT_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/res")
+list(REMOVE_DUPLICATES _custom_qml_import_path)
+set(QML_IMPORT_PATH ${_custom_qml_import_path} CACHE STRING "Extra qml import paths" FORCE)
 
 # ----------------------------------------------------------------------------
 # Custom QML module: Custom.EscTelemetry

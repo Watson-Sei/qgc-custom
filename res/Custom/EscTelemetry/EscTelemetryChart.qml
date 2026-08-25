@@ -144,8 +144,6 @@ ColumnLayout {
             model: root.seriesCount
 
             QGCLabel {
-                required property int index
-
                 property real _value: index < root.latestValues.length ? root.latestValues[index] : NaN
 
                 text:           isFinite(_value) ? _value.toFixed(root.decimals) : "–"
