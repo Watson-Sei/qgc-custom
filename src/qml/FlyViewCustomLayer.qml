@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import QGroundControl
 import QGroundControl.Controls
 
-import Custom.EscTelemetry
+import Custom.TelemetryGraph
 import Custom.HdmiVideo
 
 // Custom Fly View overlay layer.
@@ -70,7 +70,7 @@ Item {
         // Width actually taken on screen, 0 when every panel is hidden
         property real occupiedWidth: visible ? childrenRect.width : 0
 
-        EscTelemetryPanel { }
+        TelemetryGraphPanel { }
 
         // Add further left edge panels here.
 

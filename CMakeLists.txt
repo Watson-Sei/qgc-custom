@@ -19,7 +19,7 @@ message(STATUS "QGC: Custom overlay")
 # Features
 # ----------------------------------------------------------------------------
 set(QGC_CUSTOM_FEATURES
-    EscTelemetry
+    TelemetryGraph
     HdmiVideo
 )
 

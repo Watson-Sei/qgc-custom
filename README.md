@@ -11,7 +11,7 @@ QGroundControl の Fly View に独自のパネルを重ねる custom build オ�
 
 | 機能 | 内容 |
 |---|---|
-| `EscTelemetry` | ESC ごとの RPM / 電圧 / 電流を時系列グラフ表示（左端） |
+| `TelemetryGraph` | 任意の機体パラメータを時系列グラフ表示（左端）。既定は ESC ごとの RPM / 電圧 / 電流 |
 | `HdmiVideo` | UVC キャプチャ映像の表示と MP4 録画（右端） |
 
 **QGC 本体のソースは 1 行も変更していません。** upstream の更新は
@@ -61,10 +61,11 @@ custom-qgc/
     │   └── qml/
     │       └── FlyViewCustomLayer.qml   # 各機能のパネルを並べるだけ
     ├── res/Custom/                      # 1 ディレクトリ = 1 機能
-    │   ├── EscTelemetry/                # QML モジュール Custom.EscTelemetry
+    │   ├── TelemetryGraph/              # QML モジュール Custom.TelemetryGraph
     │   │   ├── CMakeLists.txt
-    │   │   ├── EscTelemetryPanel.qml    # 折りたたみパネル + サンプリング
-    │   │   └── EscTelemetryChart.qml    # 1 メトリクス分のストリップチャート
+    │   │   ├── TelemetryGraphPanel.qml  # 折りたたみパネル + サンプリング
+    │   │   ├── TelemetryChart.qml       # 1 チャート分のストリップチャート
+    │   │   └── FactSourceDialog.qml     # プロットする値のピッカー
     │   └── HdmiVideo/                   # QML モジュール Custom.HdmiVideo
     │       ├── CMakeLists.txt
     │       └── HdmiVideoPanel.qml       # UVC キャプチャ映像パネル
@@ -214,12 +215,34 @@ PYTHONPATH=~/custom-qgc/qgroundcontrol/build/_deps/mavlink-build/pip-dependencie
 
 ## 5. UI の使い方
 
-- Fly View 左端、ツールストリップの下にパネルが出ます
-  (ESC テレメトリを送ってこない機体では **非表示** になり、素の QGC と同じ見た目です)
-- ヘッダをクリックで折りたたみ / 展開 (折りたたみ中はサンプリングも停止)
-- 右上の `30s` をクリックで表示時間幅を 10 / 30 / 60 / 120 秒で切り替え
-- 凡例の `M1`, `M2`, … の色が各グラフの線色に対応
-- 各グラフのヘッダ右側に最新値を色付きで表示
+### グラフパネル (左端)
+
+Fly View 左端、ツールストリップの下に出ます。機体が繋がっていないときは非表示で、
+素の QGC と同じ見た目です。
+
+**プロットする値はチャートごとに自由に選べます。**
+
+- ヘッダの `+` で新しいチャートを追加（最大 4 枚）
+- チャートのタイトルをクリックすると値を変更
+- タイトル行右端の `×` でそのチャートを削除
+- `30s` をクリックで表示幅を 10 / 30 / 60 / 120 秒に切替
+- ヘッダをクリックで折りたたみ／展開（折りたたみ中はサンプリングも停止）
+- 各チャートのヘッダ右側に最新値を線の色付きで表示
+- 構成は `QSettings` に JSON で保存され、次回起動時に復元されます
+
+選べる値は `Vehicle` が持つ Fact ツリーそのままです。
+
+| カテゴリ | 例 |
+|---|---|
+| Vehicle | `throttlePct`（スロットル）、`altitudeRelative`、`groundSpeed`、`climbRate` など |
+| 各 Fact グループ | `gps` の `hdop`、`wind` の `direction`、`vibration` の `xAxis` など |
+| ESC (per motor) | `rpm` / `voltage` / `current` / `temperature` — **モータごとに 1 本ずつ線**を引きます |
+| Battery (per pack) | `voltage`（バッテリー電圧）、`current`、`percentRemaining` など |
+
+軸ラベル・単位・小数桁は Fact のメタデータ（`shortDescription` / `units` /
+`decimalPlaces`）から自動で決まります。ただし 100 以上の値は小数を落とします
+（RPM が `3854.00` と表示されるのを避けるため）。
+初回起動時の既定構成は ESC の RPM / 電圧 / 電流の 3 枚です。
 
 ### HDMI 映像パネル (右上)
 
@@ -268,13 +291,14 @@ FPV ゴーグルの HDMI 出力を USB HDMI キャプチャドングル経由で
 | `aspectRatio` | 16/9 | 映像枠のアスペクト比 |
 | `_expandedWidth` | 40 文字幅 | パネル幅（高さはアスペクト比から算出） |
 
-### 調整ポイント (`EscTelemetryPanel.qml`)
+### 調整ポイント (`TelemetryGraphPanel.qml`)
 
 | プロパティ | 既定値 | 意味 |
 |---|---|---|
 | `sampleIntervalMs` | 200 | サンプリング周期 (ms)。5 Hz |
-| `windowSecs` | 30 | 初期表示時間幅 (秒) |
-| `maxEscCount` | 8 | 描画する ESC の最大数 |
+| `maxCharts` | 4 | 同時に表示できるチャート数 |
+| `maxSeries` | 8 | 1 チャートに引く線の上限（ESC / バッテリー本数の上限） |
+| `seriesColors` | 8 色 | 系列ごとの線色 |
 
 ### ESC 本数の決まり方
 
@@ -284,10 +308,10 @@ FPV ゴーグルの HDMI 出力を USB HDMI キャプチャドングル経由で
 ただし upstream の `EscStatusFactGroupListModel` は ESC_STATUS 1 通につき
 `index`〜`index+3` の **4 本分まとめて** FactGroup を作るため、6 モータ機でも
 `escs.count` は 8 になり、7・8 本目が 0 のまま平らな線として出ます。
-そのため本実装では ESC_INFO の `count`（総 ESC 本数）があればそちらを優先し、
-無い場合のみ `escs.count` にフォールバックしています。
-| `seriesColors` | 8 色 | ESC ごとの線色 |
+`maxSeries` で上限を絞れます。
 
-表示位置を右側などに変えたい場合は `src/qml/FlyViewCustomLayer.qml` の
+### パネルの表示位置
+
+`src/qml/FlyViewCustomLayer.qml` の `leftEdgeColumn` / `rightEdgeColumn` の
 `anchors` と、`QGCToolInsets` で申告するインセットを合わせて変更してください
-(インセットを正しく申告しないと、地図が機体をパネルの下に再センタリングします)。
+（インセットを正しく申告しないと、地図が機体をパネルの下に再センタリングします）。

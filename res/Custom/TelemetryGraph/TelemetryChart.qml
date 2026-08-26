@@ -5,7 +5,7 @@ import QtGraphs
 import QGroundControl
 import QGroundControl.Controls
 
-/// A rolling strip chart: one LineSeries per ESC.
+/// A rolling strip chart: one LineSeries per plotted fact.
 ///
 /// X is absolute elapsed seconds and the axis window slides with it, so a
 /// sample costs one append plus one removal of the expired head rather than a
@@ -13,7 +13,8 @@ import QGroundControl.Controls
 /// sample, so the reader still sees "-30s … 0s".
 ///
 /// Data is pushed in by the owner via addSample(); the component keeps its own
-/// ring buffer and never talks to the vehicle directly.
+/// ring buffer and never talks to the vehicle directly. A source that expands
+/// to several facts (one per ESC, one per battery) simply pushes several values.
 ColumnLayout {
     id:         root
     spacing:    0
@@ -26,13 +27,15 @@ ColumnLayout {
     property int    decimals:       0       ///< Decimals used for the latest-value readout
     property real   minYSpan:       1       ///< Smallest Y range, avoids a jittery axis on flat data
 
-    /// Number of plotted ESCs, and their latest values (NaN when not reporting)
+    /// Number of plotted series, and their latest values (NaN when not reporting)
     property int    seriesCount:    0
     property var    latestValues:   []
+    /// Per-series short labels (e.g. M1..M8). Empty for single-series charts.
+    property var    seriesLabels:   []
 
     QGCPalette { id: qgcPal; colorGroupEnabled: enabled }
 
-    // Parallel history per ESC: { t: [seconds], v: [values] }. Kept alongside the
+    // Parallel history per series: { t: [seconds], v: [values] }. Kept alongside the
     // series so the Y-range scan runs in JS instead of crossing into C++ per point.
     property var  _history:     []
     property var  _series:      []
@@ -47,7 +50,7 @@ ColumnLayout {
         LineSeries { }
     }
 
-    /// Append one sample per ESC. values[i] may be NaN/undefined when missing.
+    /// Append one sample per series. values[i] may be NaN/undefined when missing.
     function addSample(tSec, values) {
         _ensureSeries(values.length)
 
@@ -91,7 +94,7 @@ ColumnLayout {
         }
     }
 
-    /// Drop all history, e.g. when the active vehicle or the ESC count changes
+    /// Drop all history, e.g. when the vehicle or the plotted source changes
     function clearData() {
         for (let i = 0; i < _series.length; i++) {
             _history[i] = { t: [], v: [] }
@@ -132,6 +135,15 @@ ColumnLayout {
         axisY.max = vMax + padding
     }
 
+    /// Fact metadata decimals are tuned for a readout, not for a compact chart
+    /// header — honouring them literally renders RPM as "3854.00".
+    function formatValue(value) {
+        if (!isFinite(value)) {
+            return "–"
+        }
+        return value.toFixed(Math.abs(value) >= 100 ? 0 : decimals)
+    }
+
     function _ensureSeries(count) {
         while (_series.length < count) {
             const index = _series.length
@@ -156,6 +168,9 @@ ColumnLayout {
         }
     }
 
+    signal titleClicked()
+    signal removeClicked()
+
     RowLayout {
         Layout.fillWidth:       true
         // Without this the row's implicit width becomes a hard floor and the
@@ -166,7 +181,15 @@ ColumnLayout {
         QGCLabel {
             text:           root.units === "" ? root.title : root.title + " [" + root.units + "]"
             font.pointSize: ScreenTools.smallFontPointSize
+            font.underline: titleMouseArea.containsMouse
             color:          qgcPal.text
+
+            MouseArea {
+                id:             titleMouseArea
+                anchors.fill:   parent
+                hoverEnabled:   true
+                onClicked:      root.titleClicked()
+            }
         }
 
         Item { Layout.fillWidth: true }
@@ -178,12 +201,46 @@ ColumnLayout {
             QGCLabel {
                 property real _value: index < root.latestValues.length ? root.latestValues[index] : NaN
 
-                text:           isFinite(_value) ? _value.toFixed(root.decimals) : "–"
+                text:           root.formatValue(_value)
                 font.pointSize: ScreenTools.smallFontPointSize
                 font.family:    ScreenTools.fixedFontFamily
                 color:          root.seriesColors.length > 0 ? root.seriesColors[index % root.seriesColors.length] : qgcPal.text
             }
         }
+
+        QGCLabel {
+            text:           "×"
+            color:          removeMouseArea.containsMouse ? qgcPal.colorRed : qgcPal.text
+            font.pointSize: ScreenTools.smallFontPointSize
+
+            MouseArea {
+                id:                 removeMouseArea
+                anchors.fill:       parent
+                anchors.margins:    -ScreenTools.defaultFontPixelWidth / 3
+                hoverEnabled:       true
+                onClicked:          root.removeClicked()
+            }
+        }
+    }
+
+    RowLayout {
+        Layout.fillWidth:       true
+        Layout.minimumWidth:    0
+        visible:                root.seriesLabels.length > 1
+        spacing:                ScreenTools.defaultFontPixelWidth / 2
+
+        Repeater {
+            model: root.seriesLabels
+
+            QGCLabel {
+                text:           modelData
+                font.pointSize: ScreenTools.smallFontPointSize
+                font.bold:      true
+                color:          root.seriesColors.length > 0 ? root.seriesColors[index % root.seriesColors.length] : qgcPal.text
+            }
+        }
+
+        Item { Layout.fillWidth: true }
     }
 
     GraphsView {
