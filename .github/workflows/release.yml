@@ -17,6 +17,11 @@ concurrency:
 
 env:
   QT_VERSION: '6.11.1'
+  # aqtinstall 3.3.0 (latest on PyPI) predates Qt 6.11's Windows repository
+  # layout — it looks for qt6_6111/qt6_6111/Updates.xml while the server now
+  # only has the arch-suffixed qt6_6111_msvc2022_64/. Fixed on master, so pin
+  # a commit until that ships as a release, then go back to plain `aqtinstall`.
+  AQT_COMMIT: '16db45a70b5905ad596941b223469bc86a56901e'
 
 jobs:
   build:
@@ -76,12 +81,18 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=python; VENV_BIN=Scripts; else PY=python3; VENV_BIN=bin; fi
           "$PY" -m venv aqtenv
-          "./aqtenv/$VENV_BIN/python" -m pip install --quiet aqtinstall
-          "./aqtenv/$VENV_BIN/python" -m aqt install-qt ${{ matrix.qt_host }} desktop "$QT_VERSION" ${{ matrix.qt_arch }} \
-            --outputdir Qt \
-            -m qtgraphs qtlocation qtpositioning qtspeech qtmultimedia qtserialport \
-               qtimageformats qtshadertools qtconnectivity qtquick3d qtsensors qtscxml \
-               qtwebsockets qthttpserver
+          "./aqtenv/$VENV_BIN/python" -m pip install --quiet "aqtinstall @ git+https://github.com/miurahr/aqtinstall@$AQT_COMMIT"
+          # Retried because the Qt mirrors intermittently fail to serve checksums
+          for attempt in 1 2 3; do
+            "./aqtenv/$VENV_BIN/python" -m aqt install-qt ${{ matrix.qt_host }} desktop "$QT_VERSION" ${{ matrix.qt_arch }} \
+              --outputdir Qt \
+              -m qtgraphs qtlocation qtpositioning qtspeech qtmultimedia qtserialport \
+                 qtimageformats qtshadertools qtconnectivity qtquick3d qtsensors qtscxml \
+                 qtwebsockets qthttpserver && break
+            echo "aqt attempt $attempt failed"
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 20
+          done
           QT_ROOT="$PWD/Qt/$QT_VERSION/${{ matrix.qt_dir }}"
           if [ "$RUNNER_OS" = "Windows" ]; then QT_ROOT=$(cygpath -m "$QT_ROOT"); fi
           test -d "$QT_ROOT" || { echo "::error::Qt not found at $QT_ROOT"; ls -R Qt | head -40; exit 1; }
