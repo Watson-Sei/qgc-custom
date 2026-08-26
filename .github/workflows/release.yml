@@ -1,7 +1,8 @@
-name: Build macOS DMG
+name: Build installers
 
-# Builds QGroundControl with this overlay applied and publishes the .dmg as the
-# rolling "latest" pre-release. The upstream QGC tag is pinned in .qgc-version.
+# Builds QGroundControl with this overlay applied for macOS and Windows, then
+# publishes both installers as the rolling "latest" pre-release.
+# The upstream QGC tag is pinned in .qgc-version.
 on:
   push:
     branches: [main]
@@ -14,13 +15,35 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write   # required to create/update the release
+env:
+  QT_VERSION: '6.11.1'
 
 jobs:
   build:
-    runs-on: macos-15
-    timeout-minutes: 120
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 150
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            runs_on: macos-15
+            qt_host: mac
+            qt_arch: clang_64
+            qt_dir: macos
+            asset: QGroundControl-custom-macOS.dmg
+          - name: Windows
+            runs_on: windows-2022
+            qt_host: windows
+            qt_arch: win64_msvc2022_64
+            qt_dir: msvc2022_64
+            asset: QGroundControl-custom-Windows-installer.exe
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout overlay
@@ -40,37 +63,63 @@ jobs:
           path: qgroundcontrol
           fetch-depth: 1
 
-      # Upstream picks the overlay up automatically from <source root>/custom
+      # Upstream picks the overlay up automatically from <source root>/custom.
+      # Copied rather than symlinked so this works the same on Windows.
       - name: Apply overlay
-        run: ln -s ../qgc-custom qgroundcontrol/custom
+        run: cp -R qgc-custom qgroundcontrol/custom
 
+      # Everything lives under the workspace on purpose: $RUNNER_TEMP is a
+      # backslashed Windows path, which bash would mangle as escape sequences.
+      # cygpath -m gives CMake a path it accepts (C:/... with forward slashes).
       - name: Install Qt
+        id: qt
         run: |
-          python3 -m venv "$RUNNER_TEMP/aqt"
-          "$RUNNER_TEMP/aqt/bin/pip" install --quiet aqtinstall
-          "$RUNNER_TEMP/aqt/bin/aqt" install-qt mac desktop "$QT_VERSION" clang_64 \
-            --outputdir "$RUNNER_TEMP/Qt" \
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=python; VENV_BIN=Scripts; else PY=python3; VENV_BIN=bin; fi
+          "$PY" -m venv aqtenv
+          "./aqtenv/$VENV_BIN/python" -m pip install --quiet aqtinstall
+          "./aqtenv/$VENV_BIN/python" -m aqt install-qt ${{ matrix.qt_host }} desktop "$QT_VERSION" ${{ matrix.qt_arch }} \
+            --outputdir Qt \
             -m qtgraphs qtlocation qtpositioning qtspeech qtmultimedia qtserialport \
                qtimageformats qtshadertools qtconnectivity qtquick3d qtsensors qtscxml \
                qtwebsockets qthttpserver
-        env:
-          QT_VERSION: '6.11.1'
+          QT_ROOT="$PWD/Qt/$QT_VERSION/${{ matrix.qt_dir }}"
+          if [ "$RUNNER_OS" = "Windows" ]; then QT_ROOT=$(cygpath -m "$QT_ROOT"); fi
+          test -d "$QT_ROOT" || { echo "::error::Qt not found at $QT_ROOT"; ls -R Qt | head -40; exit 1; }
+          echo "qt_root=$QT_ROOT" >> "$GITHUB_OUTPUT"
 
-      - name: Install build tools
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
         run: |
           for pkg in ninja ccache create-dmg; do
             brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
           done
+
+      # makensis builds the installer that `cmake --install` invokes
+      - name: Install build tools (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install ninja nsis -y --no-progress
+          echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
+
+      # Ninja needs the MSVC toolchain on PATH; the VS generator would find it
+      # on its own but builds far slower.
+      - name: Set up MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       # Upstream bootstraps <repo>/.venv itself, but its bootstrap can produce a
       # venv without pip, which makes the MAVLink header generation hard-fail.
       # python -m venv seeds pip, and PythonVenv.cmake accepts an existing venv.
       - name: Pre-seed the MAVLink build venv
         run: |
-          python3 -m venv qgroundcontrol/.venv
-          qgroundcontrol/.venv/bin/python -m ensurepip --upgrade
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=python; VENV_BIN=Scripts; else PY=python3; VENV_BIN=bin; fi
+          "$PY" -m venv qgroundcontrol/.venv
+          "./qgroundcontrol/.venv/$VENV_BIN/python" -m ensurepip --upgrade
 
       - name: Cache ccache
+        if: runner.os == 'macOS'
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/ccache
@@ -83,22 +132,31 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/Qt/$QT_VERSION/macos"
-        env:
-          QT_VERSION: '6.11.1'
+            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt_root }}"
+
+      # The Qt deploy step run by `cmake --install` needs the GStreamer DLLs that
+      # configure just downloaded to be resolvable.
+      - name: Add GStreamer to PATH (Windows)
+        if: runner.os == 'Windows'
+        working-directory: qgroundcontrol
+        run: |
+          GST_ROOT=$(grep -m1 '^GStreamer_ROOT_DIR' build/CMakeCache.txt | cut -d= -f2-)
+          if [ -n "$GST_ROOT" ]; then
+            echo "GStreamer root: $GST_ROOT"
+            echo "$GST_ROOT/bin" >> "$GITHUB_PATH"
+          fi
 
       - name: Build
         working-directory: qgroundcontrol
         run: cmake --build build --parallel
 
-      # Produces build/QGroundControl.dmg via upstream's create-dmg packaging.
-      # Signing/notarization stays off until the Secrets below are populated;
-      # see "配布について" in the release body.
-      - name: Package DMG
+      # macOS: build/QGroundControl.dmg   Windows: build/QGroundControl-installer-*.exe
+      - name: Package
         working-directory: qgroundcontrol/build
         run: cmake --install . --config Release
 
-      - name: Verify DMG
+      - name: Verify DMG (macOS)
+        if: runner.os == 'macOS'
         working-directory: qgroundcontrol/build
         run: |
           test -f QGroundControl.dmg
@@ -107,40 +165,79 @@ jobs:
           lipo -archs /Volumes/QGCVerify/QGroundControl.app/Contents/MacOS/QGroundControl
           hdiutil detach /Volumes/QGCVerify
 
-      # Fixed filename so the "latest" release keeps one stable download URL and
-      # each run replaces the previous asset instead of piling up.
-      - name: Name the artifact
+      # Fixed asset names so the "latest" release keeps stable download URLs and
+      # each run replaces the previous assets instead of piling up.
+      - name: Collect installer
         working-directory: qgroundcontrol/build
-        run: mv QGroundControl.dmg QGroundControl-custom.dmg
+        run: |
+          mkdir -p ../../out
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cp QGroundControl.dmg "../../out/${{ matrix.asset }}"
+          else
+            installer=$(ls QGroundControl-installer-*.exe | head -1)
+            echo "Found installer: $installer"
+            cp "$installer" "../../out/${{ matrix.asset }}"
+          fi
+          ls -lh ../../out
 
-      - name: Upload build artifact
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: QGroundControl-custom-${{ steps.qgc.outputs.tag }}-${{ github.sha }}
-          path: qgroundcontrol/build/QGroundControl-custom.dmg
+          name: ${{ matrix.name }}-installer
+          path: out/${{ matrix.asset }}
           retention-days: 14
+
+  release:
+    name: Publish latest
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required to create/update the release
+
+    steps:
+      - name: Checkout overlay
+        uses: actions/checkout@v4
+
+      - name: Resolve upstream QGC version
+        id: qgc
+        run: echo "tag=$(tr -d '[:space:]' < .qgc-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Write release notes
         run: |
           cat > notes.md <<'EOF'
           main への push ごとに自動ビルドされる最新版です。
 
+          | OS | ファイル |
+          |---|---|
+          | macOS (Intel / Apple Silicon) | `QGroundControl-custom-macOS.dmg` |
+          | Windows (x64) | `QGroundControl-custom-Windows-installer.exe` |
+
           - QGroundControl: ${{ steps.qgc.outputs.tag }}
           - overlay commit: ${{ github.sha }}
 
           ## インストール
 
-          **このビルドは Apple のコード署名がされていません。** そのまま開くと
-          「"QGroundControl" は壊れているため開けません」と表示されます。
-          ダウンロードして `/Applications` にコピーしたあと、一度だけ次を実行してください。
+          **どちらもコード署名がされていません。**
+
+          **macOS** — そのまま開くと「"QGroundControl" は壊れているため開けません」と
+          表示されます。`/Applications` にコピーしたあと、一度だけ次を実行してください。
 
           ```bash
           xattr -dr com.apple.quarantine /Applications/QGroundControl.app
           ```
 
+          **Windows** — SmartScreen が「WindowsによってPCが保護されました」と表示します。
+          「詳細情報」→「実行」で進めてください。
+
           ## 含まれるカスタム機能
 
-          - **ESC テレメトリ** — ESC ごとの RPM / 電圧 / 電流を Fly View 左端に時系列グラフ表示
+          - **テレメトリグラフ** — 機体パラメータを Fly View 左端に時系列グラフ表示
           - **HDMI キャプチャ** — UVC キャプチャ映像を Fly View 右端に表示、MP4 録画つき
           EOF
 
@@ -151,4 +248,4 @@ jobs:
           name: latest
           body_path: notes.md
           prerelease: true
-          files: qgroundcontrol/build/QGroundControl-custom.dmg
+          files: dist/*
