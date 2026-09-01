@@ -70,7 +70,14 @@ Rectangle {
 
     property string _statusText: ""
 
-    Component.onCompleted: expanded = panelSettings.startExpanded
+    readonly property bool _cameraAllowed: cameraPermission.status === Qt.PermissionStatus.Granted
+
+    Component.onCompleted: {
+        expanded = panelSettings.startExpanded
+        if (cameraPermission.status === Qt.PermissionStatus.Undetermined) {
+            cameraPermission.request()
+        }
+    }
     onExpandedChanged:     panelSettings.startExpanded = expanded
 
     function _twoDigits(value) {
@@ -106,14 +113,23 @@ Rectangle {
 
     MediaDevices { id: mediaDevices }
 
+    // macOS gates the camera behind a TCC permission. Qt only *checks* it
+    // (QAVFCameraBase::checkCameraPermission) and never asks, so a permission
+    // that was never requested behaves exactly like a denied one: the camera
+    // refuses to start and the panel stays black even though the device is
+    // listed. QGC's own UVCReceiver requests it for the vehicle video source;
+    // this panel has to do the same for itself.
+    CameraPermission { id: cameraPermission }
+
     CaptureSession {
         videoOutput: videoOutput
 
         camera: Camera {
+            id:           camera
             cameraDevice: root._selectedDevice ? root._selectedDevice : mediaDevices.defaultVideoInput
             // Release the capture device when the panel is not showing it, but
             // never pull it out from under an in-progress recording.
-            active:       root._selectedDevice !== null &&
+            active:       root._cameraAllowed && root._selectedDevice !== null &&
                           (root.recording || (root.visible && root.expanded))
         }
 
@@ -204,7 +220,7 @@ Rectangle {
                     color:              "transparent"
                     border.color:       enabled ? qgcPal.text : qgcPal.colorGrey
                     border.width:       1
-                    enabled:            root._selectedDevice !== null
+                    enabled:            root._cameraAllowed && root._selectedDevice !== null
 
                     Rectangle {
                         anchors.centerIn:   parent
@@ -261,12 +277,32 @@ Rectangle {
                 fillMode:       VideoOutput.PreserveAspectFit
             }
 
+            // A black frame on its own gives no clue why. The two cases that
+            // actually happen are "nothing plugged in" and "camera permission
+            // not granted", and the latter is silent on Qt's side.
             QGCLabel {
-                anchors.centerIn:   parent
-                visible:            root._devices.length === 0
-                text:               qsTr("No capture device")
-                color:              qgcPal.text
-                font.pointSize:     ScreenTools.smallFontPointSize
+                anchors.centerIn:       parent
+                width:                  parent.width - (root._margins * 2)
+                horizontalAlignment:    Text.AlignHCenter
+                wrapMode:               Text.WordWrap
+                visible:                text !== ""
+                color:                  qgcPal.text
+                font.pointSize:         ScreenTools.smallFontPointSize
+                text: {
+                    if (root._devices.length === 0) {
+                        return qsTr("No capture device")
+                    }
+                    if (cameraPermission.status === Qt.PermissionStatus.Denied) {
+                        return qsTr("Camera access denied\nSystem Settings > Privacy & Security > Camera")
+                    }
+                    if (!root._cameraAllowed) {
+                        return qsTr("Waiting for camera permission")
+                    }
+                    if (camera.error !== Camera.NoError) {
+                        return camera.errorString
+                    }
+                    return ""
+                }
             }
         }
 
